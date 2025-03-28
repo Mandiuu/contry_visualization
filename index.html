@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Senegalese Migration Data Visualization</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- PapaParse for CSV parsing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.0/papaparse.min.js"></script>
+    <!-- Leaflet for mapping -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+        }
+        .card {
+            margin-bottom: 20px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+        #search-box {
+            margin-bottom: 20px;
+        }
+        #city-table {
+            margin-top: 20px;
+        }
+        .chart-container {
+            height: 400px;
+            margin-bottom: 20px;
+        }
+        .stats-box {
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .unknown-row {
+            background-color: #f8f9fa;
+        }
+        #map {
+            height: 500px;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4">Senegalese Migration Data Visualization</h1>
+        
+        <div class="row">
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Data Controls</h5>
+                    </div>
+                    <div class="card-body">
+                        <input type="file" id="csv-file" class="form-control mb-3" accept=".csv">
+                        <div class="form-group">
+                            <label for="search-box">Filter Cities:</label>
+                            <input type="text" id="search-box" class="form-control" placeholder="Search cities...">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="stats-box">
+                    <h5>Data Summary</h5>
+                    <div id="data-summary">
+                        <p>Upload a CSV file to see summary</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Top Cities of Birth (Excluding Unknown)</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="city-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Yearly Migration Trends</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="chart-container">
+                            <canvas id="fiscal-year-chart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header">
+                <h5>Geographical Distribution</h5>
+            </div>
+            <div class="card-body">
+                <div id="map"></div>
+            </div>
+        </div>
+        
+        <div class="card" id="city-table">
+            <div class="card-header">
+                <h5>City Details</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>City</th>
+                                <th>Count</th>
+                                <th>Average Age</th>
+                                <th>% of Total</th>
+                            </tr>
+                        </thead>
+                        <tbody id="city-data"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Single consolidated script tag -->
+    <script>
+        // Global variables
+        let cityChart = null;
+        let fiscalYearChart = null;
+        let parsedData = [];
+        let map = null;
+        let markers = [];
+        
+        // Senegal city coordinates (major cities)
+        const cityCoordinates = {
+            "DAKAR": [14.6937, -17.4441],
+            "TOUBA": [14.8744, -15.8838],
+            "THIES": [14.7894, -16.9312],
+            "THIÈS": [14.7894, -16.9312],
+            "KAOLACK": [14.1652, -16.0726],
+            "MBOUR": [14.4166, -16.9666],
+            "ZIGUINCHOR": [12.5598, -16.2719],
+            "DIOURBEL": [14.6583, -16.2322],
+            "LOUGA": [15.6175, -16.2419],
+            "SAINT-LOUIS": [16.0326, -16.4818],
+            "RUFISQUE": [14.7167, -17.2667],
+            "TIVAOUANE": [14.9500, -16.8167],
+            "MBACKE": [14.7903, -15.9078],
+            "MBACKÉ": [14.7903, -15.9078],
+            "KOLDA": [12.9086, -14.9406],
+            "PIKINE": [14.7648, -17.3907],
+            "GUEDIAWAYE": [14.7687, -17.3983],
+            "TAMBACOUNDA": [13.7743, -13.6773],
+            "BARGNY": [14.6927, -17.2245],
+            "JOAL-FADIOUTH": [14.1667, -16.8333],
+            "FATICK": [14.3390, -16.4154],
+            "KAFFRINE": [14.1058, -15.5423],
+            "MATAM": [15.6559, -13.2548],
+            "KEBEMER": [15.3703, -16.4422],
+            "KÉBÉMER": [15.3703, -16.4422],
+            "VELINGARA": [13.1458, -14.1203],
+            "SEDHIOU": [12.7044, -15.5569],
+            "SÉDHIOU": [12.7044, -15.5569],
+            "RICHARD-TOLL": [16.4625, -15.7007],
+            "PODOR": [16.6598, -14.9594],
+            "BAKEL": [14.9017, -12.4570],
+            "BAMBEY": [14.6900, -16.4500],
+            "KEDOUGOU": [12.5565, -12.1747],
+            "KÉDOUGOU": [12.5565, -12.1747],
+            "YEUMBEUL": [14.7833, -17.3667],
+            "MBORO": [15.1333, -16.8833],
+            "SENEGAL": [14.4974, -14.4524],  // Country center
+            "UNKNOWN": [14.4974, -14.4524]   // Default to country center
+        };
+        
+        // DOM elements
+        const fileInput = document.getElementById('csv-file');
+        const searchBox = document.getElementById('search-box');
+        const cityData = document.getElementById('city-data');
+        const dataSummary = document.getElementById('data-summary');
+        
+        // Initialize map
+        function initMap() {
+            // Create map centered on Senegal
+            map = L.map('map').setView([14.4974, -14.4524], 7);
+            
+            // Add OpenStreetMap tiles
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+        }
+        
+        // Functions
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            
+            if (file) {
+                Papa.parse(file, {
+                    header: true,
+                    dynamicTyping: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        console.log("Parsed CSV data:", results);
+                        
+                        // Process the data - each row represents one person
+                        parsedData = results.data.map(row => ({
+                            fy: row.FY || '',
+                            city: row['City of Birth'] || 'UNKNOWN',
+                            citizenship: row.Citizenship || '',
+                            age: parseInt(row['APP Age']) || 0,
+                            date: row['APP Dt'] || ''
+                        }));
+                        
+                        // Update visualizations
+                        updateSummary(parsedData);
+                        updateCityChart(parsedData);
+                        updateFiscalYearChart(parsedData);
+                        updateCityTable(parsedData);
+                        updateMap(parsedData);
+                    },
+                    error: function(error) {
+                        console.error("Error parsing CSV:", error);
+                        alert("Error parsing CSV file. Check console for details.");
+                    }
+                });
+            }
+        }
+        
+        function filterData() {
+            const searchTerm = searchBox.value.toLowerCase();
+            const filteredData = parsedData.filter(item => 
+                item.city.toLowerCase().includes(searchTerm)
+            );
+            
+            updateCityChart(filteredData);
+            updateCityTable(filteredData);
+            updateMap(filteredData);
+        }
+        
+        function updateSummary(data) {
+            const totalMigrants = data.length;
+            const knownCities = data.filter(item => item.city !== 'UNKNOWN' && item.city !== 'unknown').length;
+            const unknownCities = totalMigrants - knownCities;
+            const uniqueCities = [...new Set(data.map(item => item.city))].length;
+            const yearsSpan = [...new Set(data.map(item => item.fy))].sort();
+            const avgAge = data.reduce((sum, item) => sum + (item.age || 0), 0) / 
+                           data.filter(item => item.age).length;
+            
+            dataSummary.innerHTML = `
+                <p><strong>Total Migrants:</strong> ${totalMigrants}</p>
+                <p><strong>Known Cities:</strong> ${knownCities} (${((knownCities/totalMigrants) * 100).toFixed(1)}%)</p>
+                <p><strong>Unknown Cities:</strong> ${unknownCities} (${((unknownCities/totalMigrants) * 100).toFixed(1)}%)</p>
+                <p><strong>Unique Cities:</strong> ${uniqueCities - 1}</p>
+                <p><strong>Year Range:</strong> ${yearsSpan[0] || 'N/A'} - ${yearsSpan[yearsSpan.length-1] || 'N/A'}</p>
+                <p><strong>Average Age:</strong> ${avgAge.toFixed(1)}</p>
+            `;
+        }
+        
+        function updateCityChart(data) {
+            // Count occurrences of each city (excluding UNKNOWN)
+            const cityCounts = {};
+            
+            data.forEach(item => {
+                // Skip UNKNOWN values
+                if (item.city === 'UNKNOWN' || item.city === 'unknown') {
+                    return;
+                }
+                
+                if (!cityCounts[item.city]) {
+                    cityCounts[item.city] = 0;
+                }
+                cityCounts[item.city]++;
+            });
+            
+            // Sort and limit to top 15
+            const sortedCities = Object.entries(cityCounts)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 15);
+            
+            const labels = sortedCities.map(item => item[0]);
+            const counts = sortedCities.map(item => item[1]);
+            
+            // Create or update chart
+            const ctx = document.getElementById('city-chart').getContext('2d');
+            
+            if (cityChart) {
+                cityChart.destroy();
+            }
+            
+            cityChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Number of Migrants',
+                        data: counts,
+                        backgroundColor: 'rgba(54, 162, 235, 0.7)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Count'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        function updateFiscalYearChart(data) {
+            // Count migrants by fiscal year
+            const fyCount = {};
+            
+            data.forEach(item => {
+                if (!fyCount[item.fy]) {
+                    fyCount[item.fy] = 0;
+                }
+                fyCount[item.fy]++;
+            });
+            
+            // Sort by fiscal year
+            const sortedYears = Object.entries(fyCount)
+                .sort((a, b) => a[0].localeCompare(b[0]));
+            
+            const labels = sortedYears.map(item => item[0]);
+            const counts = sortedYears.map(item => item[1]);
+            
+            // Create or update chart
+            const ctx = document.getElementById('fiscal-year-chart').getContext('2d');
+            
+            if (fiscalYearChart) {
+                fiscalYearChart.destroy();
+            }
+            
+            fiscalYearChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Migrants by Fiscal Year',
+                        data: counts,
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 2,
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Count'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateMap(data) {
+            // Clear previous markers
+            markers.forEach(marker => map.removeLayer(marker));
+            markers = [];
+            
+            // Count migrants by city
+            const cityCounts = {};
+            
+            data.forEach(item => {
+                // Skip UNKNOWN values if using the filter
+                if (item.city === 'UNKNOWN' || item.city === 'unknown') {
+                    return;
+                }
+                
+                if (!cityCounts[item.city]) {
+                    cityCounts[item.city] = 0;
+                }
+                cityCounts[item.city]++;
+            });
+            
+            // Add markers for each city
+            Object.entries(cityCounts).forEach(([city, count]) => {
+                // Get coordinates or use default if not found
+                const coordinates = cityCoordinates[city] || cityCoordinates['SENEGAL'];
+                
+                if (coordinates) {
+                    // Create marker with size based on count
+                    const markerSize = Math.max(5, Math.min(20, 5 + (count / 5)));
+                    
+                    const marker = L.circleMarker(coordinates, {
+                        radius: markerSize,
+                        fillColor: '#3388ff',
+                        color: '#fff',
+                        weight: 1,
+                        opacity: 1,
+                        fillOpacity: 0.7
+                    }).addTo(map);
+                    
+                    // Add popup info
+                    marker.bindPopup(`
+                        <strong>${city}</strong><br>
+                        Migrants: ${count}
+                    `);
+                    
+                    markers.push(marker);
+                }
+            });
+            
+            // Adjust map view if needed
+            if (markers.length > 0) {
+                const markerGroup = L.featureGroup(markers);
+                map.fitBounds(markerGroup.getBounds().pad(0.1));
+            }
+        }
+        
+        function updateCityTable(data) {
+            // Aggregate city data
+            const cityStats = {};
+            const totalMigrants = data.length;
+            
+            data.forEach(item => {
+                if (!cityStats[item.city]) {
+                    cityStats[item.city] = {
+                        count: 0,
+                        ageSum: 0,
+                        ageCount: 0
+                    };
+                }
+                
+                cityStats[item.city].count++;
+                
+                if (item.age) {
+                    cityStats[item.city].ageSum += item.age;
+                    cityStats[item.city].ageCount++;
+                }
+            });
+            
+            // Sort by count
+            const sortedCities = Object.entries(cityStats)
+                .sort((a, b) => b[1].count - a[1].count);
+            
+            // Generate table rows
+            cityData.innerHTML = '';
+            
+            sortedCities.forEach(([city, stats]) => {
+                const avgAge = stats.ageCount > 0 ? (stats.ageSum / stats.ageCount).toFixed(1) : 'N/A';
+                const percentOfTotal = ((stats.count / totalMigrants) * 100).toFixed(1);
+                
+                const row = document.createElement('tr');
+                
+                // Add a special class for UNKNOWN rows
+                if (city === 'UNKNOWN' || city === 'unknown') {
+                    row.classList.add('unknown-row');
+                }
+                
+                row.innerHTML = `
+                    <td>${city}</td>
+                    <td>${stats.count}</td>
+                    <td>${avgAge}</td>
+                    <td>${percentOfTotal}%</td>
+                `;
+                
+                cityData.appendChild(row);
+            });
+        }
+        
+        // Event listeners
+        fileInput.addEventListener('change', handleFileUpload);
+        searchBox.addEventListener('input', filterData);
+        
+        // Initialize map when DOM is loaded
+        document.addEventListener('DOMContentLoaded', initMap);
+    </script>
+</body>
+</html>
